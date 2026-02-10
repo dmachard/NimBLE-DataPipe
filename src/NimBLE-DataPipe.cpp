@@ -1,16 +1,19 @@
-#include "NimBLE_DataPipe.h"
+#include "NimBLE-DataPipe.h"
 
 class DataPipeServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override {
     DATAPIPE_LOG("[NimBLE-DataPipe] Client Connected");
   };
-  void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override {
+  void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo,
+                    int reason) override {
     DATAPIPE_LOG("[NimBLE-DataPipe] Client Disconnected: %d", reason);
     NimBLEDevice::startAdvertising();
   }
 };
 
-NimBLE_DataPipe::NimBLE_DataPipe(const char *deviceName, const char *serviceUuid, const char *charUuid) : _deviceName(deviceName), _serviceUuid(serviceUuid), _charUuid(charUuid) {
+NimBLE_DataPipe::NimBLE_DataPipe(const char *deviceName,
+                                 const char *serviceUuid, const char *charUuid)
+    : _deviceName(deviceName), _serviceUuid(serviceUuid), _charUuid(charUuid) {
   _rxBuffer.reserve(2048); // Initial capacity
 }
 
@@ -68,11 +71,13 @@ void NimBLE_DataPipe::sendJson(const JsonDocument &doc) {
   sendInternal(TYPE_JSON, (const uint8_t *)payload.c_str(), payload.length());
 }
 
-void NimBLE_DataPipe::sendBinary(uint8_t type, const uint8_t *data, size_t len) {
+void NimBLE_DataPipe::sendBinary(uint8_t type, const uint8_t *data,
+                                 size_t len) {
   sendInternal(type, data, len);
 }
 
-void NimBLE_DataPipe::sendInternal(uint8_t type, const uint8_t *payload, size_t len) {
+void NimBLE_DataPipe::sendInternal(uint8_t type, const uint8_t *payload,
+                                   size_t len) {
   if (!_pChar || !isConnected())
     return;
 
@@ -109,7 +114,8 @@ void NimBLE_DataPipe::sendInternal(uint8_t type, const uint8_t *payload, size_t 
   delete[] buffer;
 }
 
-void NimBLE_DataPipe::onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) {
+void NimBLE_DataPipe::onWrite(NimBLECharacteristic *pCharacteristic,
+                              NimBLEConnInfo &connInfo) {
   NimBLEAttValue val = pCharacteristic->getValue();
   const uint8_t *data = val.data();
   size_t len = val.length();

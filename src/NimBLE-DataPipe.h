@@ -16,12 +16,14 @@
 
 class NimBLE_DataPipe : public NimBLECharacteristicCallbacks {
 public:
-  typedef std::function<void(uint8_t type, const uint8_t *data, size_t len)> BinaryHandler;
+  typedef std::function<void(uint8_t type, const uint8_t *data, size_t len)>
+      BinaryHandler;
   typedef std::function<void(const JsonDocument &doc)> JsonHandler;
 
   static const uint8_t TYPE_JSON = 0x00;
 
-  NimBLE_DataPipe(const char *deviceName, const char *serviceUuid, const char *charUuid);
+  NimBLE_DataPipe(const char *deviceName, const char *serviceUuid,
+                  const char *charUuid);
 
   void begin();
   void stop();
@@ -37,7 +39,8 @@ public:
   bool isConnected();
   uint16_t getMTU();
 
-  void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override;
+  void onWrite(NimBLECharacteristic *pCharacteristic,
+               NimBLEConnInfo &connInfo) override;
 
 private:
   const char *_deviceName;

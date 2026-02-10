@@ -1,0 +1,9 @@
+rules:
+  - rule: LS003
+    skip: false
+    library:
+      paths:
+        - src/
+      exclude:
+        - .git
+        - .github

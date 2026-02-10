@@ -1,18 +1,17 @@
 #include "NimBLE_DataPipe.h"
 
 class DataPipeServerCallbacks : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer *pServer) override {
+  void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override {
     DATAPIPE_LOG("[NimBLE-DataPipe] Client Connected");
   };
-  void onDisconnect(NimBLEServer *pServer) override {
-    DATAPIPE_LOG("[NimBLE-DataPipe] Client Disconnected");
+  void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override {
+    DATAPIPE_LOG("[NimBLE-DataPipe] Client Disconnected: %d", reason);
     NimBLEDevice::startAdvertising();
   }
 };
 
-NimBLE_DataPipe::NimBLE_DataPipe(const char *deviceName, const char *serviceUuid, const char *charUuid)
-    : _deviceName(deviceName), _serviceUuid(serviceUuid), _charUuid(charUuid) {
-  _rxBuffer.reserve(2048);
+NimBLE_DataPipe::NimBLE_DataPipe(const char *deviceName, const char *serviceUuid, const char *charUuid) : _deviceName(deviceName), _serviceUuid(serviceUuid), _charUuid(charUuid) {
+  _rxBuffer.reserve(2048); // Initial capacity
 }
 
 void NimBLE_DataPipe::begin() {
@@ -34,10 +33,11 @@ void NimBLE_DataPipe::begin() {
 
   NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(_serviceUuid);
-  pAdvertising->setScanResponse(true);
+  pAdvertising->enableScanResponse(true);
   pAdvertising->start();
 
-  DATAPIPE_LOG("[NimBLE-DataPipe] Initialized (%s mode)", _useIndication ? "Indicate" : "Notify");
+  DATAPIPE_LOG("[NimBLE-DataPipe] Initialized (%s mode)",
+               _useIndication ? "Indicate" : "Notify");
 }
 
 void NimBLE_DataPipe::stop() {
@@ -77,9 +77,10 @@ void NimBLE_DataPipe::sendInternal(uint8_t type, const uint8_t *payload, size_t 
     return;
 
   uint16_t rawMTU = getMTU();
-  if (rawMTU < 5) return;
-  size_t mtu = rawMTU - 4;
-  size_t totalLen = len + 3; // Payload + 3-byte header
+  if (rawMTU < 5)
+    return;
+  size_t mtu = rawMTU - 4;   // Subtract BLE overhead
+  size_t totalLen = len + 3; // Payload + Header
 
   uint8_t *buffer = new uint8_t[totalLen];
   buffer[0] = type;
@@ -96,7 +97,7 @@ void NimBLE_DataPipe::sendInternal(uint8_t type, const uint8_t *payload, size_t 
       _pChar->indicate();
     } else {
       _pChar->notify();
-      // Only throttle on multi-chunk messages; scale with chunk count.
+      // Only throttle on multi-chunk messages; scale with chunk count
       if (totalLen > mtu) {
         size_t chunkCount = (totalLen + mtu - 1) / mtu;
         uint32_t throttleMs = (chunkCount > 10) ? 10 : 5;
@@ -108,7 +109,7 @@ void NimBLE_DataPipe::sendInternal(uint8_t type, const uint8_t *payload, size_t 
   delete[] buffer;
 }
 
-void NimBLE_DataPipe::onWrite(NimBLECharacteristic *pCharacteristic) {
+void NimBLE_DataPipe::onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) {
   NimBLEAttValue val = pCharacteristic->getValue();
   const uint8_t *data = val.data();
   size_t len = val.length();

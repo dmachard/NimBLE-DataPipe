@@ -7,6 +7,7 @@
 #include <functional>
 #include <vector>
 
+// can be disabled by defining DATAPIPE_SILENT
 #ifndef DATAPIPE_SILENT
 #define DATAPIPE_LOG(fmt, ...) Serial.printf(fmt "\n", ##__VA_ARGS__)
 #else
@@ -36,7 +37,7 @@ public:
   bool isConnected();
   uint16_t getMTU();
 
-  void onWrite(NimBLECharacteristic *pCharacteristic) override;
+  void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override;
 
 private:
   const char *_deviceName;

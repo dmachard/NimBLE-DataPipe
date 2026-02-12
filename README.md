@@ -102,3 +102,82 @@ bleDataPipe.begin();
 |------|-------------|-------|----------|
 | **Notify** (Default) | High (Link Layer ACKs) | Fast | Real-time streams, Small payloads |
 | **Indicate** | Total (GATT Layer ACKs) | Slower | Critical configs, Firmware updates |
+|--------------|-------------------------|--------|-----------------------------------|
+
+## Web side (JavaScript / Web Bluetooth)
+
+Using **NimBLE-DataPipe** from a browser is easy. Here is a minimal implementation to handle reassembly and fragmentation.
+
+### Receiving Data (Reassembly)
+
+```javascript
+let rxBuffer = new Uint8Array(0);
+let expectedType = 0;
+let expectedLen = 0;
+let headerReceived = false;
+
+function onCharacteristicValueChanged(event) {
+  const value = new Uint8Array(event.target.value.buffer);
+  let offset = 0;
+
+  if (!headerReceived) {
+    if (value.length >= 3) {
+      expectedType = value[0];
+      expectedLen = value[1] | (value[2] << 8);
+      headerReceived = true;
+      rxBuffer = new Uint8Array(0);
+      offset = 3;
+    }
+  }
+
+  // Append data
+  const chunk = value.slice(offset);
+  const newBuffer = new Uint8Array(rxBuffer.length + chunk.length);
+  newBuffer.set(rxBuffer);
+  newBuffer.set(chunk, rxBuffer.length);
+  rxBuffer = newBuffer;
+
+  // Check if complete
+  if (headerReceived && rxBuffer.length >= expectedLen) {
+    if (expectedType === 0) { // JSON
+      const jsonStr = new TextDecoder().decode(rxBuffer);
+      const doc = JSON.parse(jsonStr);
+      console.log("Received JSON:", doc);
+    } else {
+      console.log("Received Binary type", expectedType, rxBuffer);
+    }
+    headerReceived = false;
+  }
+}
+```
+
+### Sending Data (Fragmentation)
+
+To send data, you must prefix it with the 3-byte header and split it into chunks matching the MTU.
+
+```javascript
+async function sendData(characteristic, type, payload) {
+  // 1. Prepare header
+  const header = new Uint8Array(3);
+  header[0] = type;
+  header[1] = payload.length & 0xFF;
+  header[2] = (payload.length >> 8) & 0xFF;
+
+  // 2. Combine Header + Payload
+  const fullMessage = new Uint8Array(3 + payload.length);
+  fullMessage.set(header);
+  fullMessage.set(payload, 3);
+
+  // 3. Send in chunks (e.g., 20 bytes for safety if MTU is unknown)
+  const MTU = 20; 
+  for (let i = 0; i < fullMessage.length; i += MTU) {
+    const chunk = fullMessage.slice(i, i + MTU);
+    await characteristic.writeValueWithResponse(chunk);
+  }
+}
+
+// Usage for JSON
+const myData = { cmd: "wifi_save", ssid: "MyHome", pass: "12345" };
+const encoded = new TextEncoder().encode(JSON.stringify(myData));
+await sendData(characteristic, 0, encoded);
+```

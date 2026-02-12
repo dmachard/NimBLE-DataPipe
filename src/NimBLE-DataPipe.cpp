@@ -19,6 +19,7 @@ NimBLE_DataPipe::NimBLE_DataPipe(const char *deviceName,
 
 void NimBLE_DataPipe::begin() {
   NimBLEDevice::init(_deviceName);
+  NimBLEDevice::setMTU(512);
   _pServer = NimBLEDevice::createServer();
   _pServer->setCallbacks(new DataPipeServerCallbacks());
 

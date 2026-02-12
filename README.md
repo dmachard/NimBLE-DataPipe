@@ -8,16 +8,6 @@
 - **Bi-modal Support**: Built-in support for `ArduinoJson` objects and raw `uint8_t` buffers.
 - **Zero-config**: Automatically detects the best MTU for your connection.
 
-## Installation
-
-### PlatformIO
-```ini
-lib_deps =
-    h2zero/NimBLE-Arduino
-    bblanchon/ArduinoJson
-    NimBLE-DataPipe
-```
-
 ## Protocol Header (3 bytes)
 Each message is prefixed with a 3-byte technical header:
 `[TYPE (1 byte)][LENGTH (2 bytes LE)]`

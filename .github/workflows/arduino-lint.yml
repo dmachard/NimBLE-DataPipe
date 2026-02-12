@@ -15,3 +15,5 @@ jobs:
       
       - name: Run Arduino Lint
         uses: arduino/arduino-lint-action@v2
+        with:
+          library-manager: update

@@ -1,7 +1,7 @@
 .PHONY: lint
 lint:
 	@echo "Running Arduino Lint..."
-	arduino-lint $$(basename $$(PWD)) --verbose
+	arduino-lint --verbose --library-manager update ../$(notdir $(CURDIR))
 
 .PHONY: help
 help:

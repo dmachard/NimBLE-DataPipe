@@ -19,18 +19,15 @@ NimBLE_DataPipe::NimBLE_DataPipe(const char *deviceName,
 
 void NimBLE_DataPipe::begin() {
   NimBLEDevice::init(_deviceName);
-  NimBLEDevice::setMTU(512);
+  NimBLEDevice::setMTU(517); // Allow large attribute values (up to 512 payload)
   _pServer = NimBLEDevice::createServer();
   _pServer->setCallbacks(new DataPipeServerCallbacks());
 
-  uint32_t properties = NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE;
-  if (_useIndication)
-    properties |= NIMBLE_PROPERTY::INDICATE;
-  else
-    properties |= NIMBLE_PROPERTY::NOTIFY;
+  uint32_t properties = NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE |
+                        NIMBLE_PROPERTY::INDICATE;
 
   NimBLEService *pService = _pServer->createService(_serviceUuid);
-  _pChar = pService->createCharacteristic(_charUuid, properties);
+  _pChar = pService->createCharacteristic(_charUuid, properties, 514);
 
   _pChar->setCallbacks(this);
   pService->start();
@@ -40,8 +37,7 @@ void NimBLE_DataPipe::begin() {
   pAdvertising->enableScanResponse(true);
   pAdvertising->start();
 
-  DATAPIPE_LOG("[NimBLE-DataPipe] Initialized (%s mode)",
-               _useIndication ? "Indicate" : "Notify");
+  DATAPIPE_LOG("[NimBLE-DataPipe] Initialized (Indicate mode)");
 }
 
 void NimBLE_DataPipe::stop() {
@@ -85,8 +81,8 @@ void NimBLE_DataPipe::sendInternal(uint8_t type, const uint8_t *payload,
   uint16_t rawMTU = getMTU();
   if (rawMTU < 5)
     return;
-  size_t mtu = rawMTU - 4;   // Subtract BLE overhead
-  size_t totalLen = len + 3; // Payload + Header
+  size_t maxPayload = rawMTU - 4; // MTU - ATT overhead (3) - 1
+  size_t totalLen = len + 3;      // Payload + Header (Type + LenL + LenH)
 
   uint8_t *buffer = new uint8_t[totalLen];
   buffer[0] = type;
@@ -94,25 +90,28 @@ void NimBLE_DataPipe::sendInternal(uint8_t type, const uint8_t *payload,
   buffer[2] = (len >> 8) & 0xFF;
   memcpy(buffer + 3, payload, len);
 
-  for (size_t i = 0; i < totalLen; i += mtu) {
-    size_t chunkSize = min(mtu, totalLen - i);
-    _pChar->setValue(buffer + i, chunkSize);
+  DATAPIPE_LOG("[DP-TX] Sending: Type=%d, PayloadLen=%d, TotalLen=%d, MTU=%d",
+               type, len, totalLen, rawMTU);
 
-    if (_useIndication) {
-      // Indicate blocks until ACK — no throttle needed
-      _pChar->indicate();
-    } else {
-      _pChar->notify();
-      // Only throttle on multi-chunk messages; scale with chunk count
-      if (totalLen > mtu) {
-        size_t chunkCount = (totalLen + mtu - 1) / mtu;
-        uint32_t throttleMs = (chunkCount > 10) ? 10 : 5;
-        delay(throttleMs);
-      }
+  if (totalLen <= maxPayload) {
+    _pChar->indicate(buffer, totalLen);
+  } else {
+    // Large message: chunk and send with delay between each
+    for (size_t i = 0; i < totalLen; i += maxPayload) {
+      size_t chunkSize = min(maxPayload, totalLen - i);
+      if (!isConnected())
+        break;
+
+      DATAPIPE_LOG("[DP-TX] Chunk: offset=%d, size=%d", i, chunkSize);
+
+      bool ok = _pChar->indicate(buffer + i, chunkSize);
+      if (!ok)
+        break;
     }
   }
 
   delete[] buffer;
+  DATAPIPE_LOG("[DP-TX] ✅ Complete (%d bytes)", totalLen);
 }
 
 void NimBLE_DataPipe::onWrite(NimBLECharacteristic *pCharacteristic,
@@ -124,32 +123,23 @@ void NimBLE_DataPipe::onWrite(NimBLECharacteristic *pCharacteristic,
   if (len == 0)
     return;
 
-  size_t offset = 0;
-
   // 1. Handle Header
   if (!_headerReceived) {
-    if (len >= 3) {
-      _expectedType = data[0];
-      _expectedLen = data[1] | (data[2] << 8);
+    _rxBuffer.insert(_rxBuffer.end(), data, data + len);
+    if (_rxBuffer.size() >= 3) {
+      _expectedType = _rxBuffer[0];
+      _expectedLen = _rxBuffer[1] | (_rxBuffer[2] << 8);
+      _rxBuffer.erase(_rxBuffer.begin(), _rxBuffer.begin() + 3);
       _headerReceived = true;
-      _rxBuffer.clear();
-      offset = 3;
     } else {
-      // TODO: support fragmented headers in a future version
-      DATAPIPE_LOG("[NimBLE-DataPipe] Error: Fragmented header not supported");
-      return;
+      return; // Need more bytes for header
     }
+  } else {
+    // Accumulate payload data
+    _rxBuffer.insert(_rxBuffer.end(), data, data + len);
   }
 
-  // 2. Append Data
-  size_t remainingToRead = _expectedLen - _rxBuffer.size();
-  size_t canRead = min(len - offset, remainingToRead);
-
-  if (canRead > 0) {
-    _rxBuffer.insert(_rxBuffer.end(), data + offset, data + offset + canRead);
-  }
-
-  // 3. Check if Complete
+  // 2. Check if complete — call handler directly
   if (_rxBuffer.size() >= _expectedLen && _headerReceived) {
     if (_expectedType == TYPE_JSON && _jsonHandler) {
       JsonDocument doc;
@@ -163,7 +153,6 @@ void NimBLE_DataPipe::onWrite(NimBLECharacteristic *pCharacteristic,
       _binaryHandler(_expectedType, _rxBuffer.data(), _rxBuffer.size());
     }
 
-    // Reset for next message
     _headerReceived = false;
     _rxBuffer.clear();
   }

@@ -7,6 +7,17 @@
 - **Automatic Fragmentation**: Large payloads (up to 64KB) are split and reassembled transparently.
 - **Bi-modal Support**: Built-in support for `ArduinoJson` objects and raw `uint8_t` buffers.
 - **Zero-config**: Automatically detects the best MTU for your connection.
+- **Reliable Delivery**: Uses BLE Indications (GATT-level ACKs) for guaranteed delivery.
+
+## Installation
+
+### PlatformIO
+```ini
+lib_deps =
+    h2zero/NimBLE-Arduino
+    bblanchon/ArduinoJson
+    NimBLE-DataPipe
+```
 
 ## Protocol Header (3 bytes)
 Each message is prefixed with a 3-byte technical header:
@@ -17,7 +28,7 @@ Each message is prefixed with a 3-byte technical header:
 | `0x00`      | **JSON**   | Structured document (ArduinoJson compatible) |
 | `0x01-0xFF` | **Binary** | Custom application modes|
 
-## Quick Start: WiFi & NTP Config (JSON)
+## Quick Start: ESP32 Side (C++)
 
 This example shows how to build a complete configuration interface.
 
@@ -54,7 +65,93 @@ void setup() {
 }
 ```
 
-## Quick Start (Binary)
+## Quick Start: Web Side (JavaScript)
+
+Use the [Web Bluetooth API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API) to communicate with DataPipe from a browser.
+
+```javascript
+const SERVICE_UUID = "your-service-uuid";
+const CHAR_UUID    = "your-char-uuid";
+
+let device, characteristic;
+
+// --- Connect ---
+async function connect() {
+  device = await navigator.bluetooth.requestDevice({
+    filters: [{ services: [SERVICE_UUID] }]
+  });
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE_UUID);
+  characteristic = await service.getCharacteristic(CHAR_UUID);
+
+  // Listen for indications from the ESP32
+  await characteristic.startNotifications();
+  characteristic.addEventListener("characteristicvaluechanged", onReceive);
+  console.log("Connected");
+}
+
+// --- Receive (chunk reassembly) ---
+let rxBuffer = new Uint8Array(0);
+let expectedLen = 0;
+let expectedType = 0;
+let headerReceived = false;
+
+function onReceive(event) {
+  const chunk = new Uint8Array(event.target.value.buffer);
+
+  // Append chunk to buffer
+  const tmp = new Uint8Array(rxBuffer.length + chunk.length);
+  tmp.set(rxBuffer);
+  tmp.set(chunk, rxBuffer.length);
+  rxBuffer = tmp;
+
+  // Parse header once we have 3 bytes
+  if (!headerReceived && rxBuffer.length >= 3) {
+    expectedType = rxBuffer[0];
+    expectedLen = rxBuffer[1] | (rxBuffer[2] << 8);
+    rxBuffer = rxBuffer.slice(3);
+    headerReceived = true;
+  }
+
+  // Complete message?
+  if (headerReceived && rxBuffer.length >= expectedLen) {
+    const payload = rxBuffer.slice(0, expectedLen);
+
+    if (expectedType === 0x00) {
+      const json = JSON.parse(new TextDecoder().decode(payload));
+      console.log("Received JSON:", json);
+    } else {
+      console.log(`Received Binary: type=${expectedType}, ${payload.length} bytes`);
+    }
+
+    // Reset for next message
+    rxBuffer = new Uint8Array(0);
+    headerReceived = false;
+  }
+}
+
+// --- Send JSON ---
+async function sendJson(obj) {
+  const text = JSON.stringify(obj);
+  const payload = new TextEncoder().encode(text);
+  const len = payload.length;
+
+  // Header: [TYPE=0x00][LEN_LO][LEN_HI] + payload
+  const buffer = new Uint8Array(3 + len);
+  buffer[0] = 0x00;
+  buffer[1] = len & 0xFF;
+  buffer[2] = (len >> 8) & 0xFF;
+  buffer.set(payload, 3);
+
+  await characteristic.writeValueWithResponse(buffer);
+}
+
+// --- Usage ---
+await connect();
+await sendJson({ cmd: "get_info" });
+```
+
+## Binary Mode
 
 ```cpp
 bleDataPipe.setOnBinary([](uint8_t type, const uint8_t *data, size_t len) {
@@ -68,7 +165,6 @@ uint8_t myBuffer[128] = { ... };
 bleDataPipe.sendBinary(0x01, myBuffer, 128);
 ```
 
-
 ## Logging
 
 By default, the library prints status messages to `Serial`. You can silence all output by defining `DATAPIPE_SILENT` **before** including the library:
@@ -76,98 +172,4 @@ By default, the library prints status messages to `Serial`. You can silence all 
 ```cpp
 #define DATAPIPE_SILENT
 #include <NimBLE_DataPipe.h>
-```
-
-## Reliability (Notify vs Indicate)
-
-By default, **DataPipe** uses **Notifications** for maximum speed. You can switch to **Indications** for 100% reliable delivery (GATT ACKs):
-
-```cpp
-// Before calling begin()
-bleDataPipe.setUseIndication(true); 
-bleDataPipe.begin();
-```
-
-| Mode | Reliability | Speed | Use Case |
-|------|-------------|-------|----------|
-| **Notify** (Default) | High (Link Layer ACKs) | Fast | Real-time streams, Small payloads |
-| **Indicate** | Total (GATT Layer ACKs) | Slower | Critical configs, Firmware updates |
-|--------------|-------------------------|--------|-----------------------------------|
-
-## Web side (JavaScript / Web Bluetooth)
-
-Using **NimBLE-DataPipe** from a browser is easy. Here is a minimal implementation to handle reassembly and fragmentation.
-
-### Receiving Data (Reassembly)
-
-```javascript
-let rxBuffer = new Uint8Array(0);
-let expectedType = 0;
-let expectedLen = 0;
-let headerReceived = false;
-
-function onCharacteristicValueChanged(event) {
-  const value = new Uint8Array(event.target.value.buffer);
-  let offset = 0;
-
-  if (!headerReceived) {
-    if (value.length >= 3) {
-      expectedType = value[0];
-      expectedLen = value[1] | (value[2] << 8);
-      headerReceived = true;
-      rxBuffer = new Uint8Array(0);
-      offset = 3;
-    }
-  }
-
-  // Append data
-  const chunk = value.slice(offset);
-  const newBuffer = new Uint8Array(rxBuffer.length + chunk.length);
-  newBuffer.set(rxBuffer);
-  newBuffer.set(chunk, rxBuffer.length);
-  rxBuffer = newBuffer;
-
-  // Check if complete
-  if (headerReceived && rxBuffer.length >= expectedLen) {
-    if (expectedType === 0) { // JSON
-      const jsonStr = new TextDecoder().decode(rxBuffer);
-      const doc = JSON.parse(jsonStr);
-      console.log("Received JSON:", doc);
-    } else {
-      console.log("Received Binary type", expectedType, rxBuffer);
-    }
-    headerReceived = false;
-  }
-}
-```
-
-### Sending Data (Fragmentation)
-
-To send data, you must prefix it with the 3-byte header and split it into chunks matching the MTU.
-
-```javascript
-async function sendData(characteristic, type, payload) {
-  // 1. Prepare header
-  const header = new Uint8Array(3);
-  header[0] = type;
-  header[1] = payload.length & 0xFF;
-  header[2] = (payload.length >> 8) & 0xFF;
-
-  // 2. Combine Header + Payload
-  const fullMessage = new Uint8Array(3 + payload.length);
-  fullMessage.set(header);
-  fullMessage.set(payload, 3);
-
-  // 3. Send in chunks (e.g., 20 bytes for safety if MTU is unknown)
-  const MTU = 20; 
-  for (let i = 0; i < fullMessage.length; i += MTU) {
-    const chunk = fullMessage.slice(i, i + MTU);
-    await characteristic.writeValueWithResponse(chunk);
-  }
-}
-
-// Usage for JSON
-const myData = { cmd: "wifi_save", ssid: "MyHome", pass: "12345" };
-const encoded = new TextEncoder().encode(JSON.stringify(myData));
-await sendData(characteristic, 0, encoded);
 ```

@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <NimBLEDevice.h>
+
 #include <functional>
 #include <vector>
 
@@ -34,8 +35,6 @@ public:
   void setOnBinary(BinaryHandler handler) { _binaryHandler = handler; }
   void setOnJson(JsonHandler handler) { _jsonHandler = handler; }
 
-  void setUseIndication(bool use) { _useIndication = use; }
-
   bool isConnected();
   uint16_t getMTU();
 
@@ -57,7 +56,6 @@ private:
   uint8_t _expectedType = 0;
   size_t _expectedLen = 0;
   bool _headerReceived = false;
-  bool _useIndication = false;
 
   void sendInternal(uint8_t type, const uint8_t *payload, size_t len);
 };

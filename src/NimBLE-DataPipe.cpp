@@ -41,8 +41,10 @@ void NimBLE_DataPipe::begin() {
 }
 
 void NimBLE_DataPipe::stop() {
-  NimBLEDevice::deinit(true);
-  DATAPIPE_LOG("[NimBLE-DataPipe] Stopped");
+  NimBLEDevice::getAdvertising()->stop();
+  // Optionally disconnect peers if needed, but stopping advertising
+  // is enough to make the device "disappear" safely.
+  DATAPIPE_LOG("[NimBLE-DataPipe] Advertising Stopped (Safe Stop)");
 }
 
 bool NimBLE_DataPipe::isConnected() {

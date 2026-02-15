@@ -151,6 +151,58 @@ await connect();
 await sendJson({ cmd: "get_info" });
 ```
 
+
+## Advanced Usage: Class-based Configuration
+
+For larger projects, it's recommended to wrap `NimBLE-DataPipe` in a configuration manager class. This keeps your `main.cpp` clean and centralizes your JSON protocol logic.
+
+### `BleConfig.h`
+```cpp
+#include <NimBLE_DataPipe.h>
+#include <ArduinoJson.h>
+
+class BleConfig {
+public:
+  BleConfig() : _pipe("MyDevice", "SERVICE_UUID", "CHAR_UUID") {}
+
+  void begin() {
+    _pipe.setOnJson([this](const JsonDocument &doc) {
+      handleCommand(doc);
+    });
+    _pipe.begin();
+  }
+
+private:
+  NimBLE_DataPipe _pipe;
+
+  void handleCommand(const JsonDocument &doc) {
+    String cmd = doc["cmd"] | "";
+    
+    if (cmd == "set_wifi") {
+      // Logic to save WiFi...
+      JsonDocument res;
+      res["status"] = "saved";
+      _pipe.sendJson(res);
+    }
+  }
+};
+```
+
+### `main.cpp`
+```cpp
+#include "BleConfig.h"
+
+BleConfig bleConfig;
+
+void setup() {
+  bleConfig.begin();
+}
+
+void loop() {
+  // Main logic
+}
+```
+
 ## Binary Mode
 
 ```cpp

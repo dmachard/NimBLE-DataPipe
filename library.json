@@ -1,6 +1,6 @@
 {
     "name": "NimBLE-DataPipe",
-    "version": "0.1.0",
+    "version": "0.5.0",
     "description": "Lightweight BLE Data Pipe for ESP32. Transparent fragmentation for JSON and Binary buffers.",
     "keywords": "ble, json, binary, esp32, protocol, nimble, pipe, fragmentation",
     "repository": {

@@ -2,7 +2,8 @@
 
 class DataPipeServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override {
-    DATAPIPE_LOG("[NimBLE-DataPipe] Client Connected");
+    DATAPIPE_LOG("[NimBLE-DataPipe] Client Connected. Requesting fast connection interval (7.5ms - 15ms)...");
+    pServer->updateConnParams(connInfo.getConnHandle(), 6, 12, 0, 200);
   };
   void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo,
                     int reason) override {
